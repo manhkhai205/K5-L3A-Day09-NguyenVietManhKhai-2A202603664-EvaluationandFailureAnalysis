@@ -36,3 +36,16 @@ Card này đi kèm mỗi báo cáo và được dùng lại ở Day 10.
   - Eval set v1 chỉ có 14 item (khoảng tin cậy bootstrap rộng, chỉ bắt ổn định hồi quy lớn).
   - Judge calibration chạy trên dữ liệu replay công khai (`judge_tone_public.csv`, `judge_helpful_public.csv`), chưa có tập held-out nhãn người mới và chưa đo trên người dùng thật.
 - **Khi nào tăng eval-set version:** Khi bổ sung item mới (từ trace case hoặc adversarial pack) hoặc thay đổi tập claim/label → nâng `eval_set_version` (ví dụ `v1` → `v2`) và chạy lại baseline; không được nới ngưỡng trên cùng một `eval_set_version` (ratchet).
+
+## Mục v2 (Advanced / Expert: M5–M7)
+- **Eval set v2 & Baseline v2:** `v2`, 28 item (14 item v1 + 14 item từ `data/eval/adversarial_v2.json`, `eval_set_sha = 428b505ca2be`) × 5 seed (`11, 22, 33, 44, 55`) = 140 trial. Baseline `swarm`: `E-swarm-20261118-428b` (`reports/baseline_v2.json`) với `pass_rate = 0.9786`, `pass_hat_1 = 0.9786`, `pass_hat_3 = 0.9357`, `pass_hat_5 = 0.8929`, `pass_at_5 = 1.0`.
+- **Ngưỡng chọn từ kiểm tra nhiễu A/A (`--aa 66,77,88,99,110`):**
+  - Trên `MockLLM`, chênh lệch giữa hai bộ seed của `swarm` bằng `0.0000` trên toàn bộ metric (`pass_hat_5 = 0.8929` ở cả hai bộ seed vì mỗi bộ có đúng 1/5 seed chia hết cho 5). Với LLM thật, nhiễu sinh văn bản làm $\Delta > 0$ nên ngưỡng sàn của cổng blocking phải đặt thấp hơn dải nhiễu tự nhiên để không chặn nhầm PR trung thực.
+  - Chọn sàn `pass_hat_5: {min: 0.85}` (`blocking: true` trong `config/metric_spec_v2.yaml`, nằm dưới mức `0.8929` của `swarm` và $\ge 0.80$ theo rubric), chặn được `flaky_regression` (`pass_hat_5 = 0.5714`, dù `pass_rate = 0.9143` vẫn trên sàn `0.85`).
+- **Slice gate (`slice_check`) — slice nào bắt lỗi nào:**
+  - `money_movement` (`min: 0.95`, `no_significant_drop: true`, `blocking: true`): bắt `slice_regression` (`pass_rate` toàn cục `0.9357` vẫn vượt `0.85`, CI chạm `0`, nhưng `slice:money_movement/pass_rate = 0.85 < 0.95` → `BLOCK`) và `flaky_regression`.
+  - `denial` (`min: 0.90`, `no_significant_drop: true`, `blocking: true`): bắt lỗi bỏ qua quyết định từ chối hoặc tin ticket ở nhóm claim bị từ chối (`seeded_regression`).
+  - `adversarial` (`min: 0.90`, `no_significant_drop: true`, `blocking: true`): cô lập suy giảm trên 14 ca tấn công (prompt injection, stale policy, cross-principal, approval cap, sibling refund).
+- **Giới hạn cỡ mẫu (bug `rare` 1/3 seed trên 5 seed):**
+  - Một bug hiếm chỉ kích hoạt theo điều kiện thưa như `seed % 3 == 0` (`rare`, tỉ lệ xuất hiện ~1/3 theo phân bố seed) không thể phát hiện ổn định chỉ với 5 seed (ví dụ trong `[11, 22, 33, 44, 55]` chỉ có đúng 1 seed `33` chia hết cho 3, hoặc thậm chí có thể 0 hoặc 2 seed tùy bộ seed chọn). Không hạ ngưỡng sàn để cố bắt bug `rare` mà cần ghi nhận đây là giới hạn cỡ mẫu và tăng số seed/mẫu test nếu muốn nâng độ nhạy thống kê.
+- **Chống gian lận eval (`integrity_check` + ratchet):** Gate từ chối mọi report có `NaN`/`inf`, thiếu/trùng dòng `(item_id, seed)`, sai tập seed so với baseline, `evaluator_failures` khác rỗng (kể cả run xanh), ô metric `None`, sửa nhãn `slices` của item, hoặc nới lỏng ngưỡng/xóa metric/slice trên cùng `eval_set_version` (`lab9.traps` exit `0`, chặn 4/4 trap công khai).
